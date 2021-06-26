@@ -1,50 +1,51 @@
+{-# LANGUAGE FlexibleContexts #-}
+{-# LANGUAGE LambdaCase #-}
 {-# LANGUAGE NamedFieldPuns #-}
-{-# LANGUAGE OverloadedStrings #-}
 
-module ChatTerminal.Core where
+module Simplex.Input where
 
-import Control.Concurrent.STM
-import Data.ByteString.Char8 (ByteString)
+import Control.Monad.IO.Unlift
+import Control.Monad.Reader
 import qualified Data.ByteString.Char8 as B
 import Data.List (dropWhileEnd)
-import Data.Text (Text)
-import qualified Data.Text as T
-import Data.Text.Encoding
-import Simplex.Chat.Markdown
-import Styled
-import System.Console.ANSI.Types
+import Simplex.Chat.Controller
+import Simplex.Terminal
+import System.Exit (exitSuccess)
 import System.Terminal hiding (insertChars)
 import Types
+import UnliftIO.STM
 
-data ActiveTo = ActiveNone | ActiveC Contact | ActiveG Group
-  deriving (Eq)
+getKey :: MonadTerminal m => m (Key, Modifiers)
+getKey =
+  flush >> awaitEvent >>= \case
+    Left Interrupt -> liftIO exitSuccess
+    Right (KeyEvent key ms) -> pure (key, ms)
+    _ -> getKey
 
-data ChatTerminal = ChatTerminal
-  { inputQ :: TBQueue String,
-    outputQ :: TBQueue [StyledString],
-    activeTo :: TVar ActiveTo,
-    termMode :: TermMode,
-    termState :: TVar TerminalState,
-    termSize :: Size,
-    nextMessageRow :: TVar Int,
-    termLock :: TMVar ()
-  }
+runTerminalInput :: (MonadUnliftIO m, MonadReader ChatController m) => m ()
+runTerminalInput = do
+  ChatController {inputQ, chatTerminal = ct} <- ask
+  liftIO . withTerminal . runTerminalT $ do
+    updateInput ct
+    receiveFromTTY inputQ ct
 
-data TerminalState = TerminalState
-  { inputPrompt :: String,
-    inputString :: String,
-    inputPosition :: Int,
-    previousInput :: String
-  }
+receiveFromTTY :: MonadTerminal m => TBQueue InputEvent -> ChatTerminal -> m ()
+receiveFromTTY inputQ ct@ChatTerminal {activeTo, termSize, termState} =
+  forever $ getKey >>= processKey >> withTermLock ct (updateInput ct)
+  where
+    processKey :: MonadTerminal m => (Key, Modifiers) -> m ()
+    processKey = \case
+      (EnterKey, _) -> submitInput
+      key -> atomically $ do
+        ac <- readTVar activeTo
+        modifyTVar termState $ updateTermState ac (width termSize) key
 
-inputHeight :: TerminalState -> ChatTerminal -> Int
-inputHeight ts ct = length (inputPrompt ts <> inputString ts) `div` width (termSize ct) + 1
-
-positionRowColumn :: Int -> Int -> Position
-positionRowColumn wid pos =
-  let row = pos `div` wid
-      col = pos - row * wid
-   in Position {row, col}
+    submitInput :: MonadTerminal m => m ()
+    submitInput = atomically $ do
+      ts <- readTVar termState
+      let s = inputString ts
+      writeTVar termState $ ts {inputString = "", inputPosition = 0, previousInput = s}
+      writeTBQueue inputQ $ InputCommand s
 
 updateTermState :: ActiveTo -> Int -> (Key, Modifiers) -> TerminalState -> TerminalState
 updateTermState ac tw (key, ms) ts@TerminalState {inputString = s, inputPosition = p} = case key of
@@ -115,38 +116,3 @@ updateTermState ac tw (key, ms) ts@TerminalState {inputString = s, inputPosition
             afterWord = dropWhile (/= ' ') $ dropWhile (== ' ') after
          in min (length s) $ p + length after - length afterWord
     ts' (s', p') = ts {inputString = s', inputPosition = p'}
-
-styleMessage :: String -> String -> StyledString
-styleMessage time msg = do
-  case msg of
-    "" -> ""
-    s@('@' : _) -> sentMessage s
-    s@('#' : _) -> sentMessage s
-    s -> markdown s
-  where
-    sentMessage :: String -> StyledString
-    sentMessage s =
-      let (c, rest) = span (/= ' ') s
-       in styleTime time <> " " <> styled (Colored Cyan) c <> markdown rest
-    markdown :: String -> StyledString
-    markdown = styleMarkdownText . T.pack
-
-styleTime :: String -> StyledString
-styleTime = Styled [SetColor Foreground Vivid Black]
-
-safeDecodeUtf8 :: ByteString -> Text
-safeDecodeUtf8 = decodeUtf8With onError
-  where
-    onError _ _ = Just '?'
-
-ttyContact :: Contact -> StyledString
-ttyContact (Contact a) = styled (Colored Green) a
-
-ttyFromContact :: Contact -> StyledString
-ttyFromContact (Contact a) = styled (Colored Yellow) $ a <> "> "
-
-ttyGroup :: Group -> StyledString
-ttyGroup (Group g) = styled (Colored Blue) $ "#" <> g
-
-ttyFromGroup :: Group -> Contact -> StyledString
-ttyFromGroup (Group g) (Contact a) = styled (Colored Yellow) $ "#" <> g <> " " <> a <> "> "

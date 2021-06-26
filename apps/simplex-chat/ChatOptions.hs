@@ -1,4 +1,3 @@
-{-# LANGUAGE LambdaCase #-}
 {-# LANGUAGE OverloadedStrings #-}
 
 module ChatOptions (getChatOpts, ChatOpts (..)) where
@@ -11,12 +10,10 @@ import Options.Applicative
 import Simplex.Messaging.Agent.Protocol (SMPServer (..), smpServerP)
 import Simplex.Messaging.Parsers (parseAll)
 import System.FilePath (combine)
-import Types
 
 data ChatOpts = ChatOpts
   { dbFile :: String,
-    smpServers :: NonEmpty SMPServer,
-    termMode :: TermMode
+    smpServers :: NonEmpty SMPServer
   }
 
 chatOpts :: FilePath -> Parser ChatOpts
@@ -37,14 +34,6 @@ chatOpts appDir =
           <> help "SMP server(s) to use (smp1.simplex.im#pLdiGvm0jD1CMblnov6Edd/391OrYsShw+RgdfR0ChA=)"
           <> value (L.fromList ["smp1.simplex.im#pLdiGvm0jD1CMblnov6Edd/391OrYsShw+RgdfR0ChA="])
       )
-    <*> option
-      parseTermMode
-      ( long "term"
-          <> short 't'
-          <> metavar "TERM"
-          <> help ("terminal mode: editor or basic (" <> termModeName TermModeEditor <> ")")
-          <> value TermModeEditor
-      )
   where
     defaultDbFilePath = combine appDir "smp-chat.db"
 
@@ -52,12 +41,6 @@ parseSMPServer :: ReadM (NonEmpty SMPServer)
 parseSMPServer = eitherReader $ parseAll servers . B.pack
   where
     servers = L.fromList <$> smpServerP `A.sepBy1` A.char ','
-
-parseTermMode :: ReadM TermMode
-parseTermMode = maybeReader $ \case
-  "basic" -> Just TermModeBasic
-  "editor" -> Just TermModeEditor
-  _ -> Nothing
 
 getChatOpts :: FilePath -> IO ChatOpts
 getChatOpts appDir = execParser opts

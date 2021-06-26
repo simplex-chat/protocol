@@ -48,3 +48,4 @@ stack.yaml.lock
 
 # chat database
 *.db
+*.db.bak

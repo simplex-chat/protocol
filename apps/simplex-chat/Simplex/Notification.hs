@@ -2,15 +2,15 @@
 {-# LANGUAGE NamedFieldPuns #-}
 {-# LANGUAGE OverloadedStrings #-}
 
-module Notification (Notification (..), initializeNotifications) where
+module Simplex.Notification (Notification (..), initializeNotifications) where
 
-import ChatTerminal.Core (safeDecodeUtf8)
 import Control.Monad (void)
 import Data.ByteString.Char8 (ByteString)
 import Data.Char (toLower)
 import Data.List (isInfixOf)
 import Data.Text (Text)
 import qualified Data.Text as T
+import Simplex.Util (safeDecodeUtf8)
 import System.Directory (doesFileExist, getAppUserDataDirectory)
 import System.FilePath (combine)
 import System.Info (os)

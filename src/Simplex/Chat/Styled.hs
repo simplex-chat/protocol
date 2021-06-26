@@ -1,7 +1,7 @@
 {-# LANGUAGE FlexibleInstances #-}
 {-# LANGUAGE LambdaCase #-}
 
-module Styled
+module Simplex.Chat.Styled
   ( StyledString (..),
     bPlain,
     plain,

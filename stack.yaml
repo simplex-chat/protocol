@@ -43,7 +43,7 @@ extra-deps:
   # - simplexmq-0.3.1@sha256:f247aaff3c16c5d3974a4ab4d5882ab50ac78073110997c0bceb05a74d10a325,6688
   # - ../simplexmq
   - github: simplex-chat/simplexmq
-    commit: dffa7a61006aa5c4050c954857aaf1357fe33242
+    commit: 09c6adeabc533537dcc039e2195123c6f7167ebe
 #
 # extra-deps: []
 
