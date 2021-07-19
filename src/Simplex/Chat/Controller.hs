@@ -41,11 +41,12 @@ data ChatError
   deriving (Show, Exception)
 
 data ChatErrorType
-  = CEGroupRole
+  = CEGroupUserRole
+  | CEGroupContactRole ContactName
   | CEGroupDuplicateMember ContactName
   | CEGroupDuplicateMemberId
   | CEGroupNotJoined GroupName
-  | CEGroupMemberNotReady
+  | CEGroupMemberNotActive
   | CEGroupInternal String
   deriving (Show, Exception)
 

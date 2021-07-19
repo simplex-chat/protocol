@@ -75,7 +75,12 @@ A -> B: invite to group - `MSG: x.grp.inv G_MEM_ID_A,G_MEM_ROLE_A,G_MEM_ID_B,G_M
 user B confirms
 B -> A: establish group connection (B: JOIN, A: LET)
 B -> Ag: join group - `in SMP confirmation: x.grp.acpt G_MEM_ID_B`
-A -> group (including B)): announce group member: `MSG: N x.grp.mem.new G_MEM_ID_B,G_MEM_ROLE_B x.json:NNN <B_profile>`
+A -> group (including B)): announce group member: `MSG: N x.grp.mem.new G_MEM_ID_B,G_MEM_ROLE_B,G_MEM_ID_M,... x.json:NNN <B_profile>`
+
+In the message `x.grp.mem.new` A sends the sorted list of all members to whom A is connected followed by the new member ID, role and profile. The following introductions will be sent about/to all members A "knows about" (includes members introduced to A and members who accepted group invitation but not connected yet), once they are connected, so it can be a bigger list than sent in `x.grp.mem.new`.
+
+All members who received `x.grp.mem.new` from A should check the list of connected members and if any connected members that recipients invited to the group are not in this list, they should introduce them to this new member (the last ID, role and profile in `x.grp.mem.new`). That might lead to double introductions that would provide a stronger consistency of group membership at a cost of extra connection between some members that will be unused.
+
 subsequent messages between A and B are via group connection
 A -> Bg: intro member - `MSG: x.grp.mem.intro G_MEM_ID_M,G_MEM_ROLE_M x.json:NNN <M_profile>`
 B -> Ag: inv for mem - `MSG: x.grp.mem.inv G_MEM_ID_M,<gr_invitation>,<dm_invitation>,<probe>`
@@ -83,16 +88,17 @@ M is an existing member, messages are via group connection
 A -> Mg: fwd inv - `MSG: x.grp.mem.fwd G_MEM_ID_B,<gr_invitation>,<dm_invitation>,<probe>`
 M -> Bg: establish group connection (M: JOIN, B: LET)
 M -> B: establish direct connection (M: JOIN, B: LET)
-M -> Bg: confirm profile and role - `MSG: x.grp.mem.info G_MEM_ID_M,G_MEM_ROLE x.json:NNN <M_profile>`
+M -> Bg: confirm profile and role - `CONF: x.grp.mem.info G_MEM_ID_M,G_MEM_ROLE x.json:NNN <M_profile>`
+B -> Mg: send profile probe - `MSG: x.info.probe <probe>` - it should always be send, even when there is no profile match.
 if M is a known contact (profile match) send probe to M:
-  B -> M (via old DM conn): profile match probe: `MSG: x.grp.mem.probe G_MEM_ID_B,<probe_hash>`
-  M -> B (via old DM conn): probe confirm: `MSG: x.grp.mem.probe.ok G_MEM_ID_M,<probe>`
+  B -> M (via old DM conn): profile match probe: `MSG: x.info.probe.check G_MEM_ID_B,<probe_hash>`
+  M -> B (via old DM conn): probe confirm: `MSG: x.info.probe.ok G_MEM_ID_M,<probe>`
   link to the same contact
 B -> Ag: connected to M: `MSG: x.grp.mem.con G_MEM_ID_M`
 M -> Ag: connected to M: `MSG: x.grp.mem.con G_MEM_ID_B`
 
 once all members connected
-A -> group: `MSG: N x.grp.mem.ok G_MEM_ID_B`
+A -> group: `MSG: N x.grp.mem.con.all G_MEM_ID_B`
 
 #### Send group message
 

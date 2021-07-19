@@ -13,12 +13,16 @@ module Simplex.Chat.View
     showContactConnected,
     showContactDisconnected,
     showReceivedMessage,
+    showReceivedGroupMessage,
     showSentMessage,
+    showSentGroupMessage,
     showGroupCreated,
     showSentGroupInvitation,
     showReceivedGroupInvitation,
-    showConnectedGroupMember,
-    showUserConnectedToGroup,
+    showJoinedGroupMember,
+    showUserJoinedGroup,
+    showJoinedGroupMemberConnecting,
+    showConnectedToGroupMember,
     safeDecodeUtf8,
   )
 where
@@ -26,7 +30,7 @@ where
 import Control.Monad.IO.Unlift
 import Control.Monad.Reader
 import Data.ByteString.Char8 (ByteString)
-import Data.Composition ((.:))
+import Data.Composition ((.:), (.:.))
 import Data.Text (Text)
 import qualified Data.Text as T
 import Data.Time.Clock (DiffTime, UTCTime)
@@ -60,10 +64,22 @@ showContactDisconnected :: ChatReader m => ContactName -> m ()
 showContactDisconnected = printToView . contactDisconnected
 
 showReceivedMessage :: ChatReader m => ContactName -> UTCTime -> Text -> MsgIntegrity -> m ()
-showReceivedMessage c utcTime msg mOk = printToView =<< liftIO (receivedMessage c utcTime msg mOk)
+showReceivedMessage = showReceivedMessage_ . ttyFromContact
+
+showReceivedGroupMessage :: ChatReader m => GroupName -> ContactName -> UTCTime -> Text -> MsgIntegrity -> m ()
+showReceivedGroupMessage = showReceivedMessage_ .: ttyFromGroup
+
+showReceivedMessage_ :: ChatReader m => StyledString -> UTCTime -> Text -> MsgIntegrity -> m ()
+showReceivedMessage_ from utcTime msg mOk = printToView =<< liftIO (receivedMessage from utcTime msg mOk)
 
 showSentMessage :: ChatReader m => ContactName -> ByteString -> m ()
-showSentMessage c msg = printToView =<< liftIO (sentMessage c msg)
+showSentMessage = showSentMessage_ . ttyToContact
+
+showSentGroupMessage :: ChatReader m => GroupName -> ByteString -> m ()
+showSentGroupMessage = showSentMessage_ . ttyToGroup
+
+showSentMessage_ :: ChatReader m => StyledString -> ByteString -> m ()
+showSentMessage_ to msg = printToView =<< liftIO (sentMessage to msg)
 
 showGroupCreated :: ChatReader m => Group -> m ()
 showGroupCreated = printToView . groupCreated
@@ -71,14 +87,20 @@ showGroupCreated = printToView . groupCreated
 showSentGroupInvitation :: ChatReader m => Group -> ContactName -> m ()
 showSentGroupInvitation = printToView .: sentGroupInvitation
 
-showReceivedGroupInvitation :: ChatReader m => Group -> ContactName -> m ()
-showReceivedGroupInvitation = printToView .: receivedGroupInvitation
+showReceivedGroupInvitation :: ChatReader m => Group -> ContactName -> GroupMemberRole -> m ()
+showReceivedGroupInvitation = printToView .:. receivedGroupInvitation
 
-showConnectedGroupMember :: ChatReader m => GroupName -> ContactName -> m ()
-showConnectedGroupMember = printToView .: connectedGroupMember
+showJoinedGroupMember :: ChatReader m => GroupName -> GroupMember -> m ()
+showJoinedGroupMember = printToView .: joinedGroupMember
 
-showUserConnectedToGroup :: ChatReader m => GroupName -> m ()
-showUserConnectedToGroup = printToView . userConnectedToGroup
+showUserJoinedGroup :: ChatReader m => GroupName -> m ()
+showUserJoinedGroup = printToView . userJoinedGroup
+
+showJoinedGroupMemberConnecting :: ChatReader m => GroupName -> GroupMember -> GroupMember -> m ()
+showJoinedGroupMemberConnecting = printToView .:. joinedGroupMemberConnecting
+
+showConnectedToGroupMember :: ChatReader m => GroupName -> GroupMember -> m ()
+showConnectedToGroupMember = printToView .: connectedToGroupMember
 
 invitation :: SMPQueueInfo -> [StyledString]
 invitation qInfo =
@@ -101,28 +123,34 @@ contactDisconnected c = ["disconnected from " <> ttyContact c <> " - restart cha
 groupCreated :: Group -> [StyledString]
 groupCreated g@Group {localDisplayName} =
   [ "group " <> ttyFullGroup g <> " is created",
-    "use " <> highlight ("/a #" <> localDisplayName <> " <name>") <> " to add members"
+    "use " <> highlight ("/a " <> localDisplayName <> " <name>") <> " to add members"
   ]
 
 sentGroupInvitation :: Group -> ContactName -> [StyledString]
 sentGroupInvitation g c = ["invitation to join the group " <> ttyFullGroup g <> " sent to " <> ttyContact c]
 
-receivedGroupInvitation :: Group -> ContactName -> [StyledString]
-receivedGroupInvitation g@Group {localDisplayName} c =
-  [ ttyContact c <> " invites you to join the group " <> ttyFullGroup g,
-    "use " <> highlight ("/j #" <> localDisplayName) <> " to accept"
+receivedGroupInvitation :: Group -> ContactName -> GroupMemberRole -> [StyledString]
+receivedGroupInvitation g@Group {localDisplayName} c role =
+  [ ttyFullGroup g <> ": " <> ttyContact c <> " invites you to join the group as " <> plain (serializeMemberRole role),
+    "use " <> highlight ("/j " <> localDisplayName) <> " to accept"
   ]
 
-connectedGroupMember :: GroupName -> ContactName -> [StyledString]
-connectedGroupMember g c = [ttyContact c <> " joined the group " <> ttyGroup g]
+joinedGroupMember :: GroupName -> GroupMember -> [StyledString]
+joinedGroupMember g m = [ttyGroup g <> ": " <> ttyMember m <> " joined the group "]
 
-userConnectedToGroup :: GroupName -> [StyledString]
-userConnectedToGroup g = ["you joined the group " <> ttyGroup g]
+userJoinedGroup :: GroupName -> [StyledString]
+userJoinedGroup g = [ttyGroup g <> ": you joined the group"]
 
-receivedMessage :: ContactName -> UTCTime -> Text -> MsgIntegrity -> IO [StyledString]
-receivedMessage c utcTime msg mOk = do
+joinedGroupMemberConnecting :: GroupName -> GroupMember -> GroupMember -> [StyledString]
+joinedGroupMemberConnecting g host m = [ttyGroup g <> ": " <> ttyMember host <> " added " <> ttyFullMember m <> " to the group (connecting...)"]
+
+connectedToGroupMember :: GroupName -> GroupMember -> [StyledString]
+connectedToGroupMember g m = [ttyGroup g <> ": you are connected to member " <> ttyMember m]
+
+receivedMessage :: StyledString -> UTCTime -> Text -> MsgIntegrity -> IO [StyledString]
+receivedMessage from utcTime msg mOk = do
   t <- formatUTCTime <$> getCurrentTimeZone <*> getZonedTime
-  pure $ prependFirst (t <> " " <> ttyFromContact c) (msgPlain msg) ++ showIntegrity mOk
+  pure $ prependFirst (t <> " " <> from) (msgPlain msg) ++ showIntegrity mOk
   where
     formatUTCTime :: TimeZone -> ZonedTime -> StyledString
     formatUTCTime localTz currentTime =
@@ -145,10 +173,10 @@ receivedMessage c utcTime msg mOk = do
     msgError :: String -> [StyledString]
     msgError s = [styled (Colored Red) s]
 
-sentMessage :: ContactName -> ByteString -> IO [StyledString]
-sentMessage c msg = do
+sentMessage :: StyledString -> ByteString -> IO [StyledString]
+sentMessage to msg = do
   time <- formatTime defaultTimeLocale "%H:%M" <$> getZonedTime
-  pure $ prependFirst (styleTime time <> " " <> ttyToContact c) (msgPlain $ safeDecodeUtf8 msg)
+  pure $ prependFirst (styleTime time <> " " <> to) (msgPlain $ safeDecodeUtf8 msg)
 
 prependFirst :: StyledString -> [StyledString] -> [StyledString]
 prependFirst s [] = [s]
@@ -162,9 +190,10 @@ chatError = \case
   ChatError err -> case err of
     CEGroupDuplicateMember c -> ["contact " <> ttyContact c <> " is already in the group"]
     CEGroupDuplicateMemberId -> ["cannot add member - duplicate member ID"]
-    CEGroupRole -> ["insufficient role for this group command"]
+    CEGroupUserRole -> ["you have insufficient permissions for this group command"]
+    CEGroupContactRole c -> ["contact " <> ttyContact c <> " has insufficient permissions for this group action"]
     CEGroupNotJoined g -> ["you did not join this group, use " <> highlight ("/join #" <> g)]
-    CEGroupMemberNotReady -> ["you cannot invite other members yet, try later"]
+    CEGroupMemberNotActive -> ["you cannot invite other members yet, try later"]
     CEGroupInternal s -> ["chat group bug: " <> plain s]
   -- e -> ["chat error: " <> plain (show e)]
   ChatErrorStore err -> case err of
@@ -191,7 +220,17 @@ ttyContact = styled (Colored Green)
 
 ttyFullContact :: Contact -> StyledString
 ttyFullContact Contact {localDisplayName, profile = Profile {fullName}} =
-  ttyContact localDisplayName <> optFullName localDisplayName fullName
+  ttyFullName localDisplayName fullName
+
+ttyMember :: GroupMember -> StyledString
+ttyMember GroupMember {localDisplayName} = ttyContact localDisplayName
+
+ttyFullMember :: GroupMember -> StyledString
+ttyFullMember GroupMember {localDisplayName, memberProfile = Profile {fullName}} =
+  ttyFullName localDisplayName fullName
+
+ttyFullName :: ContactName -> Text -> StyledString
+ttyFullName c fullName = ttyContact c <> optFullName c fullName
 
 ttyToContact :: ContactName -> StyledString
 ttyToContact c = styled (Colored Cyan) $ "@" <> c <> " "
@@ -206,9 +245,15 @@ ttyFullGroup :: Group -> StyledString
 ttyFullGroup Group {localDisplayName, groupProfile = GroupProfile {fullName}} =
   ttyGroup localDisplayName <> optFullName localDisplayName fullName
 
-optFullName :: Text -> Text -> StyledString
+ttyFromGroup :: GroupName -> ContactName -> StyledString
+ttyFromGroup g c = styled (Colored Yellow) $ "#" <> g <> " " <> c <> "> "
+
+ttyToGroup :: GroupName -> StyledString
+ttyToGroup g = styled (Colored Cyan) $ "#" <> g <> " "
+
+optFullName :: ContactName -> Text -> StyledString
 optFullName localDisplayName fullName
-  | localDisplayName == fullName = ""
+  | T.null fullName || localDisplayName == fullName = ""
   | otherwise = plain (" (" <> fullName <> ")")
 
 highlight :: StyledFormat a => a -> StyledString
@@ -216,9 +261,6 @@ highlight = styled (Colored Cyan)
 
 highlight' :: String -> StyledString
 highlight' = highlight
-
--- ttyFromGroup :: Group -> Contact -> StyledString
--- ttyFromGroup (Group g) (Contact a) = styled (Colored Yellow) $ "#" <> g <> " " <> a <> "> "
 
 styleTime :: String -> StyledString
 styleTime = Styled [SetColor Foreground Vivid Black]

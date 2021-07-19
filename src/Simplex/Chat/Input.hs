@@ -81,7 +81,7 @@ updateTermState ac tw (key, ms) ts@TerminalState {inputString = s, inputPosition
     contactPrefix = case ac of
       ActiveNone -> ""
       ActiveC c -> "@" <> T.unpack c <> " "
-    -- ActiveG (Group g) -> "#" <> B.unpack g <> " "
+      ActiveG g -> "#" <> T.unpack g <> " "
     backDeleteChar
       | p == 0 || null s = ts
       | p >= length s = ts' (init s, length s - 1)

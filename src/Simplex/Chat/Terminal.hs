@@ -15,7 +15,7 @@ import System.Terminal
 import System.Terminal.Internal (LocalTerminal, Terminal, VirtualTerminal)
 import UnliftIO.STM
 
-data ActiveTo = ActiveNone | ActiveC ContactName
+data ActiveTo = ActiveNone | ActiveC ContactName | ActiveG GroupName
   deriving (Eq)
 
 data ChatTerminal = ChatTerminal
